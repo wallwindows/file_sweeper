@@ -1,8 +1,8 @@
 """Core functionality for file sweeper."""
 
-import click
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
+import click
 
 
 class FileOrganizer:
@@ -15,9 +15,10 @@ class FileOrganizer:
             root_path: Root directory to scan for files.
         """
         self.root_path = root_path
+        self.last_operation: List[Dict[str, Any]] = []
 
     def scan(self) -> List[Path]:
-        """Scan root_path for all files (excluding subdirectories and hidden files).
+        """Scan root_path for all files (excluding hidden files).
 
         Returns:
             List of file paths.
@@ -54,9 +55,6 @@ class FileOrganizer:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        if file_path.is_dir():
-            raise ValueError(f"Path is a directory: {file_path}")
-
         extension = file_path.suffix.lower()
 
         category_map = {
@@ -75,6 +73,139 @@ class FileOrganizer:
         }
 
         return category_map.get(extension, "Others")
+
+    def organize(self, dry_run: bool = False) -> List[Dict[str, Any]]:
+        """Organize files by moving them to category subdirectories.
+
+        Args:
+            dry_run: If True, don't actually move files.
+
+        Returns:
+            List of operation records.
+
+        Raises:
+            FileNotFoundError: If root_path doesn't exist.
+            NotADirectoryError: If root_path is not a directory.
+        """
+        if not self.root_path.exists():
+            raise FileNotFoundError(f"Path not found: {self.root_path}")
+
+        if not self.root_path.is_dir():
+            raise NotADirectoryError(f"Path is not a directory: {self.root_path}")
+
+        files = self.scan()
+        records: List[Dict[str, Any]] = []
+
+        for file in files:
+            category = self.categorize(file)
+            dst_dir = self.root_path / category
+
+            # If category directory exists, move to category/category
+            if dst_dir.exists():
+                dst_dir = dst_dir / category
+            dst_dir.mkdir(exist_ok=True)
+
+            dst_path = dst_dir / file.name
+
+            record = {
+                "src": str(file),
+                "dst": str(dst_path),
+                "category": category,
+            }
+
+            if not dry_run:
+                try:
+                    if not dst_path.exists():
+                        file.rename(dst_path)
+                except Exception as e:
+                    print(f"Error moving {file} to {dst_path}: {e}")
+                    raise
+
+            records.append(record)
+
+        # Also scan subdirectories for files that may have been missed
+        subdirs = [d for d in self.root_path.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        for subdir in subdirs:
+            for item in subdir.rglob("*"):
+                if item.is_file() and not item.name.startswith("."):
+                    category = self.categorize(item)
+                    dst_dir = self.root_path / category
+
+                    # If category directory exists, move to category/category
+                    if dst_dir.exists():
+                        dst_dir = dst_dir / category
+                    dst_dir.mkdir(exist_ok=True)
+
+                    dst_path = dst_dir / item.name
+
+                    record = {
+                        "src": str(item),
+                        "dst": str(dst_path),
+                        "category": category,
+                    }
+
+                    if not dry_run:
+                        item.rename(dst_path)
+
+                    records.append(record)
+
+        self.last_operation = records
+        return records
+
+    def undo_last(self) -> bool:
+        """Undo the last organize operation by moving files back to their original locations.
+
+        Returns:
+            True if undo was successful, False if no operations to undo.
+        """
+        if not self.last_operation:
+            return False
+
+        # Make a copy of last_operation since we'll be modifying it
+        ops = list(self.last_operation)
+        self.last_operation.clear()
+
+        # Collect all dst paths that exist
+        existing_dsts = [Path(op["dst"]) for op in ops if Path(op["dst"]).exists()]
+
+        if not existing_dsts:
+            return False
+
+        # Move files up multiple levels to root
+        # Files from root->subdir should go subdir->root
+        # Files from root->subdir->subsubdir should go subsubdir->subdir
+        for dst in reversed(existing_dsts):
+            # Get the current location of the file/directory
+            current = Path(dst)
+            # Move up until we reach or pass root
+            while True:
+                parent = current.parent
+                if parent == self.root_path:
+                    # At root level, move to root
+                    if current.is_file():
+                        target = self.root_path / current.name
+                        if target != current:
+                            current.rename(target)
+                    elif current.is_dir():
+                        for item in current.iterdir():
+                            target = self.root_path / item.name
+                            if target != item:
+                                item.rename(target)
+                    break
+                else:
+                    # Move up one level
+                    if current.is_dir():
+                        for item in current.iterdir():
+                            target = parent / item.name
+                            if target != item:
+                                item.rename(target)
+                    else:
+                        target = parent / current.name
+                        if target != current:
+                            current.rename(target)
+                    current = parent
+
+        return True
 
 
 class FileSweeper:
