@@ -2,6 +2,79 @@
 
 import click
 from pathlib import Path
+from typing import List
+
+
+class FileOrganizer:
+    """Utility class for organizing files by extension."""
+
+    def __init__(self, root_path: Path) -> None:
+        """Initialize the FileOrganizer.
+
+        Args:
+            root_path: Root directory to scan for files.
+        """
+        self.root_path = root_path
+
+    def scan(self) -> List[Path]:
+        """Scan root_path for all files (excluding subdirectories and hidden files).
+
+        Returns:
+            List of file paths.
+
+        Raises:
+            FileNotFoundError: If root_path doesn't exist.
+            NotADirectoryError: If root_path is not a directory.
+        """
+        if not self.root_path.exists():
+            raise FileNotFoundError(f"Path not found: {self.root_path}")
+
+        if not self.root_path.is_dir():
+            raise NotADirectoryError(f"Path is not a directory: {self.root_path}")
+
+        files = []
+        for item in self.root_path.iterdir():
+            if item.is_file() and not item.name.startswith("."):
+                files.append(item)
+
+        return sorted(files)
+
+    def categorize(self, file_path: Path) -> str:
+        """Categorize a file based on its extension.
+
+        Args:
+            file_path: The file path to categorize.
+
+        Returns:
+            Category name as string.
+
+        Raises:
+            FileNotFoundError: If file_path doesn't exist.
+        """
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        if file_path.is_dir():
+            raise ValueError(f"Path is a directory: {file_path}")
+
+        extension = file_path.suffix.lower()
+
+        category_map = {
+            ".jpg": "Images",
+            ".jpeg": "Images",
+            ".png": "Images",
+            ".gif": "Images",
+            ".txt": "Documents",
+            ".md": "Documents",
+            ".py": "Python",
+            ".js": "Python",
+            ".cpp": "Python",
+            ".java": "Python",
+            ".c": "Python",
+            ".pyw": "Python",
+        }
+
+        return category_map.get(extension, "Others")
 
 
 class FileSweeper:
